@@ -1,0 +1,193 @@
+---
+title: "Recommender System for Movies"
+author: "Yadu"
+date: "January 31, 2017"
+output: html_document
+---
+
+## Motivation
+
+There are quite a number of missing values for this dataset. There are some movie ratings that have unknown ratings from particular users. The purpose of this recommender system is to fill the missing values. 
+
+## Data Creation
+
+We will build a toy dataset as follows and then replace all of the missing values with column means.  
+
+```{r}
+moviesraw <- matrix(c(4, NA, 3, 5, NA, 5, 4, NA, 5, 4, 2, NA, 2, 4, NA, 3, 3, 4, 5, NA), nrow = 5, byrow = T)
+colnames(moviesraw) <- c("Batman Begins", "Alice in Wonderland", "Dumb and Dumber", "Equilibrium")
+rownames(moviesraw) <- c("Adam", "Benjamin", "Charlie", "David", "Edward")
+
+movies <- matrix(NA, nrow = nrow(moviesraw), ncol = ncol(moviesraw))
+for(i in 1:ncol(movies)){
+  movies[,i] <- moviesraw[,i]
+  movies[is.na(moviesraw[,i]), i] <- trunc(mean(moviesraw[,i], na.rm = TRUE),1)
+}
+colnames(movies) <- colnames(moviesraw)
+rownames(movies) <- rownames(moviesraw)
+movies
+```
+
+## Similarity Matrix Creation
+
+The following function renders the similarity matrix also known as the cosine matrix. The reason this is called the cosine matrix is because the dot product of two vectors are computed and then divided by the product of the magnitude of the two vectors.   
+
+```{r}
+similarity_matrix <- function(v1, v2) {
+  cosine_similarity <- sum(v1*v2, na.rm = TRUE)/(sqrt(sum(v1^2, na.rm = TRUE))*sqrt(sum(v2^2, na.rm = TRUE)))
+}
+```
+
+## User-User Similarity Matrix
+
+This is the similarity matrix that finds other users whose past rating behavior is similar to that of the current user and then uses their ratings on other items to predict what the current user will like. 
+
+```{r}
+user_sim <- data.frame(matrix(NA, nrow = nrow(movies), ncol = nrow(movies)))
+for(i in 1:nrow(user_sim)){
+  for(j in 1:ncol(user_sim)){
+    user_sim[i,j] <- similarity_matrix(t(movies[i,]), t(movies[j,]))
+  }
+}
+colnames(user_sim) <- rownames(user_sim) <- rownames(movies)
+user_sim
+```
+
+## Movie-Movie Similarity Matrix
+
+This is the similarity matrix that finds other movies that have past ratings similar to those of the current movie and then uses their ratings by other users to predict how the current movie will be liked.
+
+```{r}
+movie_sim <- data.frame(matrix(NA, nrow = ncol(movies), ncol = ncol(movies)))
+for(i in 1:nrow(movie_sim)){
+  for(j in 1:ncol(movie_sim)){
+    movie_sim[i,j] <- similarity_matrix(t(movies[,i]), t(movies[,j]))
+  }
+}
+colnames(movie_sim) <- rownames(movie_sim) <- colnames(movies)
+movie_sim
+```
+
+## User Means Centering
+
+In order to evaluate the user-user similarities, the ratings provided by the users have to be mean-centered so that the ratings are viewed relative to their own average ratings. We accomplish this by subtracting the calculated mean for each user from each rating. 
+
+```{r}
+user_means <- as.matrix(trunc(rowMeans(movies)))
+user_means_adj <- matrix(NA, nrow = 5, ncol = 4)
+for (i in 1:ncol(user_means_adj)){
+  user_means_adj[,i] <- abs(movies[,i] - user_means)
+}
+colnames(user_means_adj) <- colnames(movies)
+rownames(user_means_adj) <- rownames(movies)
+user_means_adj
+```
+
+## Movie Means Centering
+
+In order to evaluate the movie-movie similarities, the ratings provided for the movies have to be mean-centered so that the ratings are viewed relative to their own average ratings. We accomplish this by subtracting the calculated mean for each movie from each rating.
+
+```{r}
+movie_means <- as.matrix(trunc(colMeans(movies)))
+movie_means_adj <- matrix(NA, nrow = 5, ncol = 4)
+for (i in 1:ncol(movie_means_adj)){
+  movie_means_adj[,i] <- abs(movies[,i] - movie_means[i])
+}
+colnames(movie_means_adj) <- colnames(movies)
+rownames(movie_means_adj) <- rownames(movies)
+movie_means_adj
+```
+
+## User-User Collaborative Recommendation
+
+The following function genarates a collaborative user-based recommendation. Let us see how Benjamin would rate the movie Equilibrium. 
+
+```{r}
+genrec_user <- function(user, movie){
+  prediction <- user_means[user, ] + (as.matrix(user_sim[user, ])%*%as.matrix(user_means_adj[,movie]))/sum(user_sim[user,])
+  return(as.numeric(prediction))
+}
+handcode_rec1 <- genrec_user("Benjamin","Equilibrium")
+handcode_rec1
+```
+
+## Movie-Movie Collaborative Recommendation
+
+The following function genarates a collaborative movie-based recommendation. Let us see how Benjamin would rate the movie Equilibrium.
+
+```{r}
+genrec_movie <- function(user, movie){
+  prediction <- movie_means[movie, ] + (movie_means_adj[user,]%*%as.matrix(movie_sim[,movie]))/sum(movie_sim[movie,])
+  return(as.numeric(prediction))
+}
+handcode_rec2 <- genrec_movie("Benjamin", "Equilibrium")
+handcode_rec2
+```
+
+## Creating the User-Based Model Using Prepackaged System
+
+The user-based model is created using the original dataset containing all of the unknown values. 
+
+```{r}
+library(recommenderlab)
+reclab_ratings <- as(moviesraw, 'realRatingMatrix')
+recc_model <- Recommender(data = reclab_ratings, method = 'UBCF', parameter = list(method = "Cosine"))
+```
+
+## Applying the User-Based Model
+
+The model is applied to the dataset. 
+
+```{r}
+recom <- predict(recc_model, reclab_ratings, type = "ratings")
+```
+
+## User-Based Model Result
+
+The result of the user-based model is as follows.
+
+```{r}
+recom <- as(recom, 'matrix')
+builtin_rec1 <- recom['Benjamin','Equilibrium']
+builtin_rec1
+```
+
+## Creating the Movie-Based Model Using Prepackaged System
+
+The movie-based model is created using the original dataset containing all of the unknown values. 
+
+```{r}
+library(recommenderlab)
+recc_model <- Recommender(data = reclab_ratings, method = 'IBCF', parameter = list(method = "Cosine"))
+```
+
+## Applying the Movie-Based Model
+
+The model is applied to the dataset. 
+
+```{r}
+recom <- predict(recc_model, reclab_ratings, type = "ratings")
+```
+
+## Movie-Based Model Result
+
+The result of the movie-based model is as follows.
+
+```{r}
+recom <- as(recom, 'matrix')
+builtin_rec2 <- recom['Benjamin','Equilibrium']
+builtin_rec2
+```
+
+```{r}
+display <- data.frame(types = c('User-User by Hand', 'Movie-Movie by Hand', 
+                                'User-User by Package', 'Movie-Movie by Package'),
+                      ratings = c(handcode_rec1, handcode_rec2,
+                                  builtin_rec1, builtin_rec2))
+
+library(knitr)
+
+kable(display)
+```
+
+The computed values and pre-packaged values are precise and at least 4. This shows that Benjamin might like the movie Equilibrium. But due to the fact that this dataset is random and not too big, the conclusions drawn may not be very relevant.  
